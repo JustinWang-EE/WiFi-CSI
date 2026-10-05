@@ -1,0 +1,17 @@
+{
+  "dataset": "MM-Fi",
+  "protocol": "P3/S2 official cross-subject",
+  "train_samples": 256608,
+  "heldout_samples": 64152,
+  "model": "CNN v0",
+  "parameters": 95827,
+  "seed": 0,
+  "best_epoch": 23,
+  "metrics": {
+    "raw_mpjpe_mm": 234.6863,
+    "root_aligned_mpjpe_mm": 121.8368,
+    "corrected_pa_mpjpe_mm": 103.7247,
+    "mse_m2": 0.02620452370
+  },
+  "qualification": "One seed. Corrected PA-MPJPE supersedes the obsolete 140.2568 mm value and was validated against the official MM-Fi evaluator. No broad superiority claim is made."
+}

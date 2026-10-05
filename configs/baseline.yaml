@@ -1,0 +1,29 @@
+experiment_name: official_p3_s2_cnn_v0
+split:
+  protocol: P3
+  type: official_S2_cross_subject
+  train_samples: 256608
+  heldout_samples: 64152
+  heldout_subjects: [S05, S10, S15, S20, S25, S30, S35, S40]
+model:
+  name: CNN_v0
+  expected_trainable_parameters: 95827
+training:
+  seed: 0
+  optimizer: Adam
+  learning_rate: 0.0003
+  weight_decay: 0.0
+  loss: MSELoss
+  batch_size: 64
+  maximum_epochs: 30
+  early_stopping_patience: 8
+  checkpoint_criterion: heldout_raw_mpjpe
+train_loader:
+  shuffle: true
+  drop_last: true
+  num_workers: 0
+heldout_loader:
+  shuffle: false
+  drop_last: false
+  num_workers: 0
+
