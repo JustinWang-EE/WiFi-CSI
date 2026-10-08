@@ -45,18 +45,26 @@ epoch 23.
 
 ## Reproduction
 
-Use Python 3.10 or newer. Create an environment and install dependencies:
+The project is managed with [uv](https://docs.astral.sh/uv/). `uv.lock` pins
+every dependency, including a CUDA 12.8 build of PyTorch (`torch>=2.7`, required
+for Blackwell GPUs such as the RTX 50 series). CUDA 12.8 needs NVIDIA driver 570
+or newer; the same wheel also runs on CPU-only machines.
+
+Install uv, then create the environment. uv downloads the Python version pinned
+in `.python-version` (3.11) if it is not already installed:
 
 ```bash
-python -m venv .venv
-python -m pip install -r requirements.txt
-python -m pip install -e .
+uv sync
+uv run python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+uv run pytest
 ```
+
+The version should end in `+cu128`. The metric tests need no dataset.
 
 Build a cache from a separately downloaded MM-Fi dataset and official toolbox:
 
 ```bash
-python scripts/build_cache.py \
+uv run python scripts/build_cache.py \
   --dataset-root /path/to/MMFi/dataset \
   --toolbox-root /path/to/MMFi_dataset \
   --output-dir /path/to/mmfi-p3-s2-cache
@@ -65,12 +73,12 @@ python scripts/build_cache.py \
 Train and evaluate:
 
 ```bash
-python -m wifi_densepose.train \
+uv run wifi-densepose-train \
   --cache-dir /path/to/mmfi-p3-s2-cache \
   --config configs/baseline.yaml \
   --output-dir outputs/baseline
 
-python -m wifi_densepose.evaluate \
+uv run wifi-densepose-evaluate \
   --cache-dir /path/to/mmfi-p3-s2-cache \
   --checkpoint outputs/baseline/best.pt \
   --output outputs/baseline/evaluation.json
@@ -78,6 +86,31 @@ python -m wifi_densepose.evaluate \
 
 Paths are command-line arguments; no machine-specific dataset path is embedded
 in the release.
+
+### Managing dependencies
+
+Add or change dependencies with `uv add <package>` (or
+`uv add --group dev <package>` for development tools) and commit the updated
+`pyproject.toml` and `uv.lock`. Do not use `uv pip install`; packages installed
+that way are not recorded in the lock file and are removed by the next
+`uv sync`. After changing dependencies, regenerate `requirements.txt`:
+
+```bash
+uv export --no-dev --no-hashes -o requirements.txt
+```
+
+### Without uv
+
+`requirements.txt` is exported from `uv.lock` for pip users. Do not edit it by
+hand. PyTorch must come from the CUDA 12.8 index:
+
+```bash
+python -m venv .venv
+python -m pip install -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu128
+```
+
+Activate the environment and replace `uv run` with plain commands, for example
+`python -m pytest` and `wifi-densepose-train ...`.
 
 ## Evaluation Metrics
 
