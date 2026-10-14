@@ -1,0 +1,40 @@
+experiment_name: p3_s2_rootrel_dann
+split:
+  protocol: P3
+  type: official_S2_cross_subject
+  train_samples: 256608
+  heldout_samples: 64152
+  # Official held-out subjects = TEST. Only evaluated once, after training.
+  heldout_subjects: [S05, S10, S15, S20, S25, S30, S35, S40]
+  # Carved out of the 32 official training subjects (one per environment)
+  # for checkpoint selection / early stopping. The identity head sees the other 28.
+  validation_subjects: [S04, S14, S24, S34]
+target: root_relative          # root_relative | absolute
+model:
+  name: CNN_v0
+  expected_trainable_parameters: 95827   # pose network only; identity head not counted
+adversary:
+  enabled: true
+  lambda_max: 0.1              # override with --lambda for the sweep
+  ramp_epochs: 10              # Ganin schedule reaches ~lambda_max after this many epochs
+  hidden: 128
+  learning_rate: 0.0003
+training:
+  seed: 0
+  optimizer: Adam
+  learning_rate: 0.0003
+  weight_decay: 0.0
+  loss: MSELoss
+  batch_size: 64
+  maximum_epochs: 30
+  selection_start_epoch: 10    # epochs before this are never selected / never count toward patience
+  early_stopping_patience: 8
+  checkpoint_criterion: validation_root_aligned_mpjpe
+train_loader:
+  shuffle: true
+  drop_last: true
+  num_workers: 0
+eval_loader:
+  shuffle: false
+  drop_last: false
+  num_workers: 0
