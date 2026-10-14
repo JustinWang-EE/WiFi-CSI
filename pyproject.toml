@@ -16,6 +16,10 @@ dependencies = [
 ]
 
 [dependency-groups]
+analysis = [
+    "matplotlib>=3.10.9",
+    "scikit-learn>=1.7.2",
+]
  dev = ["pytest>=8"]
 
 [tool.uv.sources]
