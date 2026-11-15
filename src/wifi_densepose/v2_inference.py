@@ -1,4 +1,4 @@
-"""Matched-window confidence inference for the frozen InSense V2 D0 bundle."""
+"""CPU inference for the three InSense V2 models on one 64-frame CSI window."""
 from __future__ import annotations
 
 import argparse
@@ -50,40 +50,26 @@ class WindowID:
         object.__setattr__(self, 'frames', tuple(map(int,frames)))
 
 
-@dataclass(frozen=True)
-class HeadPrediction:
-    identity: WindowID
-    classes: tuple[str, ...]
-    model_sha256: str
-    taxonomy_sha256: str
-    logits: tuple[float, ...]
-    probabilities: tuple[float, ...]
-    top1: str
-    index: int
-    confidence: float
-    margin: float
-
-
-def probabilities(logits, temperature=1.0):
+def probabilities(logits):
     x = np.asarray(logits, dtype=np.float64)
     if x.ndim == 0 or not x.size or x.shape[-1] < 2 or not np.isfinite(x).all():
         raise ValueError('Invalid logits')
-    if not np.isfinite(temperature) or temperature <= 0:
-        raise ValueError('Temperature must be positive and finite')
-    x = (x - x.max(axis=-1, keepdims=True)) / temperature
+    x = x - x.max(axis=-1, keepdims=True)
     weights = np.exp(x)
     return weights / weights.sum(axis=-1, keepdims=True)
 
 
-def describe(head, logits, identity, config):
-    classes, taxonomy = (K4,K4_SHA) if head == 'posture' else (M3,M3_SHA)
-    x = np.asarray(logits, dtype=np.float64)
-    if x.shape != (len(classes),):
+def head_output(logits, classes):
+    p = probabilities(logits)
+    if p.shape != (len(classes),):
         raise ValueError('Unexpected class dimension')
-    p = probabilities(x, config['heads'][head]['temperature'])
-    first, second = np.argsort(-p, kind='stable')[:2]
-    return HeadPrediction(identity, classes, CHECKPOINTS[head][0], taxonomy, tuple(map(float,x)), tuple(map(float,p)),
-                          classes[first], int(first), float(p[first]), float(p[first]-p[second]))
+    index = int(np.argmax(logits))
+    return index, {
+        'predicted_class': classes[index],
+        'class_probabilities_pct': {
+            name: 100 * float(value) for name, value in zip(classes, p)
+        },
+    }
 
 
 def state_code(posture, motion=None):
@@ -96,48 +82,16 @@ def state_code(posture, motion=None):
     return f'S{posture}{motion}'
 
 
-def combine(posture, motion, config):
-    empty = {'state': None, 'candidate_state': None, 'state_name': None}
-    if posture.identity != motion.identity or posture.classes != K4 or motion.classes != M3:
-        return empty | {'status': 'INVALID_INPUT', 'reason': 'HEAD_IDENTITY_OR_CLASS_MISMATCH'}
-    candidate = state_code(posture.index, motion.index)
-    output = empty | {'candidate_state': candidate, 'state_name': STATE_NAMES[candidate]}
-    if config['calibration_status'] != 'VERIFIED':
-        return output | {'status': 'UNCERTAIN', 'reason': 'CONFIDENCE_UNVERIFIED'}
-    for name, result in [('posture', posture), ('motion', motion)]:
-        thresholds = config['heads'][name]['thresholds']
-        if (thresholds is None or result.confidence < thresholds['confidence']
-                or result.margin < thresholds['margin']):
-            return output | {'status': 'UNCERTAIN', 'reason': name.upper()+'_ABSTAIN'}
-    return output | {'status': 'VALID', 'state': candidate, 'reason': None}
-
-
-def head_output(prediction):
-    return {
-        'predicted_class': prediction.top1,
-        'confidence_pct': 100 * prediction.confidence,
-        'class_probabilities_pct': {
-            name: 100 * value for name, value in zip(prediction.classes, prediction.probabilities)
-        },
-    }
-
-
 def load_config(path):
     cfg = json.loads(Path(path).read_text(encoding='utf-8-sig'))
-    if cfg.get('schema') != 'insense-v2-confidence/1' or cfg.get('calibration_status') not in ('UNVERIFIED','VERIFIED'):
-        raise ValueError('Unsupported confidence configuration')
+    if cfg.get('schema') != 'insense-v2/1':
+        raise ValueError('Unsupported V2 inference configuration')
     if cfg.get('checkpoints') != {name: terms[0] for name,terms in CHECKPOINTS.items()}:
         raise ValueError('Checkpoint allowlist mismatch')
     for name, classes, digest in [('posture', K4, K4_SHA), ('motion', M3, M3_SHA)]:
         h = cfg['heads'][name]
         if tuple(h['classes']) != classes or h['taxonomy_sha256'] != digest:
             raise ValueError('Wrong class order or taxonomy digest')
-        temp, thresh = h['temperature'], h['thresholds']
-        probabilities([0.,1.],temp)
-        if cfg['calibration_status'] == 'UNVERIFIED' and thresh is not None:
-            raise ValueError('Unverified policy cannot enable acceptance thresholds')
-        if thresh is not None and (set(thresh) != {'confidence','margin'} or any(not 0 <= t <= 1 for t in thresh.values())):
-            raise ValueError('Invalid thresholds')
         for key in ('mean','std'):
             v = np.asarray(h[key], dtype=np.float64)
             if v.shape != (48,) or not np.isfinite(v).all() or (key=='std' and np.any(v <= 0)):
@@ -146,6 +100,8 @@ def load_config(path):
 
 
 def preprocess_csi(values, *, stage7=False):
+    if np.iscomplexobj(values):
+        raise ValueError('Expected real CSI amplitudes')
     x = np.array(values, dtype=np.float64, copy=True)
     if x.shape != (WINDOW,3,114,10):
         raise ValueError('Expected [64,3,114,10] CSI tensor')
@@ -189,7 +145,7 @@ def checkpoint_state(path, name):
     return state
 
 
-class ConfidenceModel:
+class InSenseV2:
     def __init__(self, config_path, *, root, posture, motion):
         self.config=load_config(config_path)
         self.root=SmallCSIPoseCNN()
@@ -205,11 +161,11 @@ class ConfidenceModel:
 
     @torch.inference_mode()
     def logits_from_pose(self, poses):
-        """Both heads consume exactly the same D0 window. Caller binds cached pose IDs."""
+        """Compute K4 and M3 logits for the same batch of D0 pose windows."""
         x = np.asarray(poses)
         if x.ndim != 4 or x.shape[1:] != (WINDOW,17,3) or not len(x) or not np.isfinite(x).all():
             raise ValueError('Expected finite [N,64,17,3] D0 poses')
-        # Match the old caches: drop predicted pelvis without subtracting it.
+        # The heads were trained on joints 1–16 in the original D0 coordinates.
         flat=x[:,:,1:,:].reshape(len(x),WINDOW,48).transpose(0,2,1)
         answer={}
         for name in ('posture','motion'):
@@ -222,29 +178,33 @@ class ConfidenceModel:
 
     @torch.inference_mode()
     def infer(self, csi, *, subject, sequence, window, frames, stage7=False):
-        identity=None
-        frame_ids=()
+        identity = None
         try:
-            frame_ids=tuple(frames) if frames is not None else ()
-            identity=WindowID(subject,sequence,window,frame_ids)
-            x=preprocess_csi(csi,stage7=stage7)
-            pose=self.root(torch.from_numpy(x)).numpy()
-            logits=self.logits_from_pose(pose[None])
-        except (TypeError,ValueError,OverflowError) as e:
-            return {'status':'INVALID_INPUT','state':None,'candidate_state':None,'state_name':None,
-                    'reason':str(e),'identity':asdict(identity) if identity else
-                    {'subject':subject,'sequence':sequence,'window':window,'frames':tuple(
-                        int(f) if isinstance(f, Integral) else None for f in frame_ids)},'posture':None,'motion':None,
-                    'policy_version':self.config['policy_version'],'root_sha256':CHECKPOINTS['root'][0]}
-        p=describe('posture',logits['posture'][0],identity,self.config)
-        m=describe('motion',logits['motion'][0],identity,self.config)
-        return combine(p,m,self.config) | {'identity':asdict(identity),'posture':head_output(p),'motion':head_output(m),
-                                           'policy_version':self.config['policy_version'],'root_sha256':CHECKPOINTS['root'][0]}
+            identity = WindowID(subject, sequence, window, frames)
+            x = preprocess_csi(csi, stage7=stage7)
+        except (TypeError, ValueError, OverflowError) as error:
+            return {
+                'status': 'INVALID_INPUT', 'reason': str(error),
+                'identity': asdict(identity) if identity else None,
+                'candidate_state': None, 'state_name': None, 'posture': None, 'motion': None,
+            }
+
+        pose = self.root(torch.from_numpy(x)).numpy()
+        logits = self.logits_from_pose(pose[None])
+        posture_index, posture = head_output(logits['posture'][0], K4)
+        motion_index, motion = head_output(logits['motion'][0], M3)
+        candidate = state_code(posture_index, motion_index)
+        return {
+            'status': 'VALID', 'identity': asdict(identity),
+            'posture': posture, 'motion': motion,
+            'candidate_state': candidate, 'state_name': STATE_NAMES[candidate],
+            'root_sha256': CHECKPOINTS['root'][0],
+        }
 
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config',type=Path,default=Path('configs/insense_v2_confidence.json'))
+    parser.add_argument('--config',type=Path,default=Path('configs/insense_v2.json'))
     for name in ('root','posture','motion'):
         parser.add_argument('--'+name,type=Path,default=Path(f'models/V2-{name}.pt'))
     for name in ('csi','identity'):
@@ -252,10 +212,21 @@ def main():
     parser.add_argument('--stage7',action='store_true')
     args=parser.parse_args()
     torch.set_num_threads(4)
-    ids=json.loads(args.identity.read_text(encoding='utf-8-sig'))
-    net=ConfidenceModel(args.config,root=args.root,posture=args.posture,motion=args.motion)
-    print(json.dumps(net.infer(np.load(args.csi,allow_pickle=False),stage7=args.stage7,**ids),allow_nan=False))
+    try:
+        ids = json.loads(args.identity.read_text(encoding='utf-8-sig'))
+        if not isinstance(ids, dict) or set(ids) != {'subject', 'sequence', 'window', 'frames'}:
+            raise ValueError('Identity must contain subject, sequence, window and frames')
+        csi = np.load(args.csi, allow_pickle=False)
+        if not isinstance(csi, np.ndarray):
+            csi.close()
+            raise ValueError('Expected a single NPY CSI array')
+    except (OSError, ValueError, EOFError) as error:
+        parser.error(str(error))
+    net = InSenseV2(args.config, root=args.root, posture=args.posture, motion=args.motion)
+    result = net.infer(csi, stage7=args.stage7, **ids)
+    print(json.dumps(result, allow_nan=False))
+    return 0 if result['status'] == 'VALID' else 2
 
 
 if __name__=='__main__':
-    main()
+    raise SystemExit(main())

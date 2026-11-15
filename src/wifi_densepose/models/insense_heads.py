@@ -1,4 +1,4 @@
-"""Checkpoint-compatible K4 and M3 heads used by the D0 confidence bundle."""
+"""Checkpoint-compatible K4 and M3 heads for InSense V2."""
 import torch
 from torch import nn
 from torch.nn import functional as F

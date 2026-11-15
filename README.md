@@ -1,53 +1,69 @@
 # InSense V2
 
-WiFi CSI-based Human Pose, Posture and Motion Recognition
+WiFi CSI Human Pose and Activity Recognition
 
 ```text
 64 consecutive CSI frames
-  -> V2-root (17 joints per frame)
-  -> V2-posture / V2-motion (4 posture / 3 motion classes)
-  -> 10 Safety State candidates
+  -> V2-root (17 joints × XYZ per frame)
+  -> V2-posture + V2-motion
+  -> 10 candidate Safety States
 ```
 
-| Model | Parameters |
-|---|---:|
-| V2-root | 95,827 |
-| V2-posture | 111,492 |
-| V2-motion | 115,523 |
-| **Total** | **322,842** |
+| Model | Architecture | Parameters |
+|---|---|---:|
+| V2-root | SmallCSIPoseCNN | 95,827 |
+| V2-posture | Residual TCN, four posture classes | 111,492 |
+| V2-motion | Residual TCN with temporal-difference pooling, three motion classes | 115,523 |
+| **Total** | | **322,842** |
 
-## Install and run
+## Run inference
 
-Use Python 3.10 or newer. Activate a virtual environment, then run from the
-repository root:
+Use Python 3.10 or newer. From the repository root, in an activated virtual
+environment:
 
 ```bash
 python -m pip install -e .
-python -m wifi_densepose.confidence --csi window.npy --identity identity.json
+python -m wifi_densepose.v2_inference --csi window.npy --identity identity.json
+```
+
+- `window.npy` contains real CSI amplitudes with shape `[64, 3, 114, 10]`.
+  Add `--stage7` when supplying finite, already normalized amplitudes in
+  `[0, 1]`.
+- `identity.json` contains nonempty string fields `subject`, `sequence` and
+  `window`, and a `frames` array with 64 consecutive nonnegative integers
+  in CSI order, for example 0 to 63.
+- The JSON result contains each head's `predicted_class` and
+  `class_probabilities_pct`, plus `candidate_state` and `state_name`.
+  `VALID` means the input was accepted and classified. Malformed windows
+  return `INVALID_INPUT` and the CLI exits with code 2.
+
+The [model architecture](docs/INSENSE_V2_MODEL_ARCHITECTURE.md) gives the
+checkpoint hashes, preprocessing and state mapping. The models are included
+and verified on load.
+
+## Model performance
+
+| Model | DEV evaluation unit | Result |
+|---|---|---|
+| V2-root | Pose frames | 112.63 mm Root17 MPJPE |
+| V2-posture | 972 aligned 64-frame windows | 63.79% Accuracy, 43.42% Macro-F1 |
+| V2-motion | 850 labeled 64-frame windows | 57.88% Accuracy, 58.17% Macro-F1 |
+
+The classification results use overlapping, non-independent DEV windows and
+proxy labels. The posture labels come from Action27 and the motion labels
+come from ground-truth pose geometry. Candidate states are research outputs
+without independent household safety validation.
+
+CPU inference is verified. Embedded and FPGA deployment remain research
+directions. Device latency, memory use and quantized performance are
+unmeasured for this release.
+
+## Tests
+
+```bash
 python -m pip install pytest
 python -m pytest -q
 ```
-
-Add `--stage7` for already normalized CSI. The three included checkpoints load
-on CPU and are verified against the SHA256 values in the
-[release model manifest](models/manifest.json). The Posture release file
-uses a filename-only taxonomy reference and preserves all model tensors.
-See the [input format and output
-schema](docs/INSENSE_V2_CONFIDENCE_USAGE.md) and the
-[model architecture](docs/INSENSE_V2_MODEL_ARCHITECTURE.md).
-
-The CLI gives the Posture and Motion class, Top-1 confidence and all class
-probabilities separately. The deterministic mapping gives a candidate code and
-name. The shipped acceptance policy returns `UNCERTAIN` on valid windows,
-with exploratory temperatures and no enabled thresholds.
-
-Accuracy is the fraction of correctly labeled eligible windows. Macro-F1 gives
-each class equal weight in the mean F1. Confidence is the model's Top-1 softmax
-after exploratory temperature scaling. It does not establish the probability
-of a validated safety event. The [confidence evaluation](docs/INSENSE_V2_CONFIDENCE_EVALUATION.md)
-reports matched DEV window results and their coverage limits. CPU end-to-end
-inference has been verified on sampled Stage7 windows. V2 has no independent
-household safety validation, official TEST result or device deployment result.
 
 ## WiFi-DensePose research baseline
 
