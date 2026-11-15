@@ -33,7 +33,6 @@ Checkpoint identities, SHA256 hashes, class ordering, preprocessing, and the exa
 |---|---|---:|---:|
 | V2-root (D0) | Pose frames (pelvis-relative Root17) | — | **112.63 mm MPJPE** |
 | V2-posture (K4, best epoch 15) | **216 sequences**, each aggregated from nine window logits | **69.91%** | **52.94% Macro-F1** |
-| V2-posture (same released weights) | **972 overlapping 64-frame windows** | 63.79% | 43.42% Macro-F1 |
 | V2-motion (M3, best epoch 4) | **850 labeled 64-frame windows** | 57.88% | 58.17% Macro-F1 |
 
 **The two Posture rows use different units and cohorts.** The 216-sequence evaluation averages nine window logits per recording for eight DEV subjects: S04, S09, S14, S19, S24, S29, S34, and S39. The 972-window Posture result uses individual windows from S04, S14, S24, and S34. The 850 labeled Motion windows are a subset of those same 972 windows. The difference between the Posture scores cannot be attributed to aggregation alone. The Root result measures pose error in millimetres.
