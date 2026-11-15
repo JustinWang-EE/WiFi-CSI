@@ -1,199 +1,90 @@
 # InSense V2
 
-WiFi CSI Human Pose and Activity Recognition
+**WiFi CSI-based 3D pose estimation, posture recognition, and motion recognition — research prototype.**
+
+InSense V2 processes 64 consecutive WiFi CSI amplitude frames through one shared pose-estimation model and two separate classification heads. Their predictions are combined by a fixed rule into **10 candidate states**. The states are research labels, **not independently validated household safety events or fall alerts**.
 
 ```text
-64 consecutive CSI frames
-  -> V2-root (17 joints × XYZ per frame)
-  -> V2-posture + V2-motion
-  -> 10 candidate Safety States
+64 consecutive CSI amplitude frames [64, 3, 114, 10]
+    │
+    └── V2-root → pelvis-relative 3D pose [64, 17, 3]
+                         ├── V2-posture → 4 posture classes
+                         └── V2-motion  → 3 motion classes
+                                      ↓
+                        Fixed 10-state candidate mapping
 ```
 
-| Model | Architecture | Parameters |
+## Models
+
+| Released checkpoint | Architecture | Parameters |
 |---|---|---:|
-| V2-root | SmallCSIPoseCNN | 95,827 |
-| V2-posture | Residual TCN, four posture classes | 111,492 |
-| V2-motion | Residual TCN with temporal-difference pooling, three motion classes | 115,523 |
-| **Total** | | **322,842** |
+| `models/V2-root.pt` | SmallCSIPoseCNN | 95,827 |
+| `models/V2-posture.pt` | Residual TCN; four-class head | 111,492 |
+| `models/V2-motion.pt` | Residual TCN with temporal-difference pooling; three-class head | 115,523 |
+| **Shared system total** | One pose backbone, two heads | **322,842** |
+
+All three released checkpoints are from the **D0-compatible shared-root configuration**. The root checkpoint produces 17 pelvis-relative XYZ joint coordinates per frame; **it does not estimate a person's absolute location in a room**. Each classification head applies its own training-set normalization to the predicted poses.
+
+Checkpoint identities, SHA256 hashes, class ordering, preprocessing, and the exact state mapping are documented in [Model architecture](docs/INSENSE_V2_MODEL_ARCHITECTURE.md). Model files are verified during loading.
+
+## Model performance
+
+| Released model | DEV evaluation unit | Accuracy | Macro-F1 / pose error |
+|---|---|---:|---:|
+| V2-root (D0) | Pose frames (pelvis-relative Root17) | — | **112.63 mm MPJPE** |
+| V2-posture (K4, best epoch 15) | **216 sequences**, each aggregated from nine window logits | **69.91%** | **52.94% Macro-F1** |
+| V2-posture (same released weights) | **972 overlapping 64-frame windows** | 63.79% | 43.42% Macro-F1 |
+| V2-motion (M3, best epoch 4) | **850 labeled 64-frame windows** | 57.88% | 58.17% Macro-F1 |
+
+**The two Posture rows use different units and cohorts.** The 216-sequence evaluation averages nine window logits per recording for eight DEV subjects: S04, S09, S14, S19, S24, S29, S34, and S39. The 972-window Posture result uses individual windows from S04, S14, S24, and S34. The 850 labeled Motion windows are a subset of those same 972 windows. The difference between the Posture scores cannot be attributed to aggregation alone. The Root result measures pose error in millimetres.
+
+All released-model scores are **exploratory, non-independent DEV results**. The downstream DEV subjects are within the upstream D0 DEV cohort used for checkpoint selection and are disjoint from D0 TRAIN. The head evaluations use overlapping windows and proxy labels: Posture groups Action27 labels, and Motion derives labels from ground-truth pose geometry. These scores do not establish independent household safety-state accuracy.
+
+## Ten candidate states
+
+Posture produces four classes (`B0`–`B3`) and Motion produces three classes (Static, Activity, Transition). The fixed mapping makes nine combinations of `B0`–`B2` and Motion, and collapses all three `B3` (Jump) combinations into `S30`.
+
+| Posture prediction | Motion: Static | Motion: Activity | Motion: Transition |
+|---|---|---|---|
+| `B0` | `S00` | `S01` | `S02` |
+| `B1` | `S10` | `S11` | `S12` |
+| `B2` | `S20` | `S21` | `S22` |
+| `B3` (Jump) | `S30` | `S30` | `S30` |
+
+The inference output exposes each head's predicted class and all **four / three raw softmax percentages**, along with the mapped `candidate_state` and `state_name`. These percentages are **model output scores, not calibrated probabilities of correctness**. No confidence-based filtering is part of this release. In particular, a candidate state must not be interpreted as a verified safety warning.
 
 ## Run inference
 
-Use Python 3.10 or newer. From the repository root, in an activated virtual
-environment:
+Use Python 3.10 or newer. From the repository root, in an activated virtual environment:
 
 ```bash
 python -m pip install -e .
 python -m wifi_densepose.v2_inference --csi window.npy --identity identity.json
 ```
 
-- `window.npy` contains real CSI amplitudes with shape `[64, 3, 114, 10]`.
-  Add `--stage7` when supplying finite, already normalized amplitudes in
-  `[0, 1]`.
-- `identity.json` contains nonempty string fields `subject`, `sequence` and
-  `window`, and a `frames` array with 64 consecutive nonnegative integers
-  in CSI order, for example 0 to 63.
-- The JSON result contains each head's `predicted_class` and
-  `class_probabilities_pct`, plus `candidate_state` and `state_name`.
-  `VALID` means the input was accepted and classified. Malformed windows
-  return `INVALID_INPUT` and the CLI exits with code 2.
+- `window.npy`: 64 real-valued **CSI amplitude** frames with shape `[64, 3, 114, 10]`, in chronological order. This is **not** an interface for arbitrary raw complex CSI packets.
+- `--stage7`: use only if the input is already finite, normalized Stage7 amplitude data in `[0, 1]`; the usual raw-amplitude preprocessing is then bypassed.
+- `identity.json`: nonempty string fields `subject`, `sequence`, and `window`, plus `frames` containing 64 ordered, consecutive, nonnegative integer frame IDs (for example, 0 through 63).
+- The result JSON includes each head's `predicted_class` and `class_probabilities_pct`, plus `candidate_state` and `state_name`.
+- `VALID` indicates that an input passed validation and the pipeline returned a candidate prediction; **it does not indicate that the prediction is correct**. Windows that fail amplitude, shape, or frame-ID checks return `INVALID_INPUT` and exit code `2`. File and JSON parsing errors are reported by the CLI.
 
-The [model architecture](docs/INSENSE_V2_MODEL_ARCHITECTURE.md) gives the
-checkpoint hashes, preprocessing and state mapping. The models are included
-and verified on load.
+The default configuration is [`configs/insense_v2.json`](configs/insense_v2.json). See the [architecture document](docs/INSENSE_V2_MODEL_ARCHITECTURE.md) for the preprocessing and coordinate contracts.
 
-## Model performance
-
-| Model | DEV evaluation unit | Result |
-|---|---|---|
-| V2-root | Pose frames | 112.63 mm Root17 MPJPE |
-| V2-posture | 972 aligned 64-frame windows | 63.79% Accuracy, 43.42% Macro-F1 |
-| V2-motion | 850 labeled 64-frame windows | 57.88% Accuracy, 58.17% Macro-F1 |
-
-The classification results use overlapping, non-independent DEV windows and
-proxy labels. The posture labels come from Action27 and the motion labels
-come from ground-truth pose geometry. Candidate states are research outputs
-without independent household safety validation.
-
-CPU inference is verified. Embedded and FPGA deployment remain research
-directions. Device latency, memory use and quantized performance are
-unmeasured for this release.
-
-## Tests
+## Tests and deployment status
 
 ```bash
 python -m pip install pytest
 python -m pytest -q
 ```
 
-## WiFi-DensePose research baseline
+The three models have passed strict checkpoint loading, CPU inference on eight real Stage7 CSI windows, and the released inference tests. This establishes functional pipeline compatibility **on a computer**, not hardware parity or independent recognition accuracy.
 
-### Overview
+**STM32 deployment is planned, not verified.** On-device latency, peak RAM, streaming behavior, quantization accuracy, and any confidence/abstention policy must be measured separately before making deployment claims. There is currently no validated end-to-end fall-detection result.
 
-WiFi-DensePose is a compact research baseline for regressing 17-joint 3D human
-poses from MM-Fi WiFi channel-state information (CSI). This release focuses on
-a reproducible CNN baseline and keeps datasets, caches, checkpoints, and local
-experiment history outside the repository.
+## Dataset, earlier research, and licensing
 
-### Current Status
+This project uses the [MM-Fi dataset](https://ntu-aiot-lab.github.io/mm-fi) and interoperates with the [official MM-Fi toolbox](https://github.com/ybhbingo/MMFi_dataset). The dataset and local experiment caches are **not** redistributed. See [Third-party notices](THIRD_PARTY_NOTICES.md) for attribution and dataset terms.
 
-The official MM-Fi P3/S2 cross-subject baseline is complete for one seed. The
-repository contains the canonical model, cache adapter, training and evaluation
-entry points, corrected pose metrics, and the validated result summary. Hardware
-deployment, quantization, pruning, and downstream event detection remain future
-work.
+The original **WiFi-DensePose CNN baseline** is a separate historical experiment with a different training run and evaluation protocol. Its reproduction commands, official P3/S2 split, and pose metrics are preserved in [Legacy WiFi-DensePose baseline](docs/WIFI_DENSEPOSE_BASELINE.md). **Do not treat its scores as V2-root scores.**
 
-### Dataset
-
-This project uses [MM-Fi](https://ntu-aiot-lab.github.io/mm-fi) under its
-official P3/S2 cross-subject protocol:
-
-- 256,608 training samples
-- 64,152 held-out samples
-- WiFi CSI input shape: `(3, 114, 10)`
-- 3D pose target shape: `(17, 3)`
-
-The dataset is not redistributed. Follow the
-[official MM-Fi toolbox and download instructions](https://github.com/ybhbingo/MMFi_dataset),
-then retain the dataset outside this repository. See
-[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) for attribution and license
-considerations.
-
-### Baseline Model
-
-CNN v0 has 95,827 trainable parameters. It uses three convolution/ReLU blocks,
-adaptive average pooling, and a two-layer regressor from CSI to 17×3 pose
-coordinates.
-
-Training recipe: MSE loss, Adam, learning rate `3e-4`, batch size 64, seed 0,
-maximum 30 epochs, and early-stopping patience 8. The validated run selected
-epoch 23.
-
-### Reproduction
-
-Use Python 3.10 or newer. Create an environment and install dependencies:
-
-```bash
-python -m venv .venv
-python -m pip install -r requirements.txt
-python -m pip install -e .
-```
-
-Build a cache from a separately downloaded MM-Fi dataset and official toolbox:
-
-```bash
-python scripts/build_cache.py \
-  --dataset-root /path/to/MMFi/dataset \
-  --toolbox-root /path/to/MMFi_dataset \
-  --output-dir /path/to/mmfi-p3-s2-cache
-```
-
-Train and evaluate:
-
-```bash
-python -m wifi_densepose.train \
-  --cache-dir /path/to/mmfi-p3-s2-cache \
-  --config configs/baseline.yaml \
-  --output-dir outputs/baseline
-
-python -m wifi_densepose.evaluate \
-  --cache-dir /path/to/mmfi-p3-s2-cache \
-  --checkpoint outputs/baseline/best.pt \
-  --output outputs/baseline/evaluation.json
-```
-
-Paths are command-line arguments; no machine-specific dataset path is embedded
-in the release.
-
-### Evaluation Metrics
-
-- **Raw MPJPE:** absolute/world-coordinate mean per-joint position error.
-- **Root-aligned MPJPE:** translation alignment using root index 0.
-- **PA-MPJPE:** per-sample similarity alignment with translation, proper
-  rotation, and uniform scale.
-- **MSE:** coordinate-wise mean squared error in square metres.
-
-The PA implementation was corrected after a covariance/rotation convention
-error was found. The implementation in this release matches the official MM-Fi
-evaluator on synthetic identity, translation, rotation, scale, combined, and
-noisy cases. The obsolete PA result is not reported here.
-
-### Results
-
-One seed on the official P3/S2 held-out split:
-
-| Metric | Result |
-|---|---:|
-| Raw MPJPE | 234.6863 mm |
-| Root-aligned MPJPE | 121.8368 mm |
-| Corrected PA-MPJPE | 103.7247 mm |
-| MSE | 0.02620452370 m² |
-
-These are single-run results from a different architecture than the MM-Fi
-paper baseline. They do not establish formal superiority. Machine-readable
-values are in [`results/baseline.json`](results/baseline.json).
-
-### Project Roadmap
-
-1. Repeat the baseline across multiple seeds and report uncertainty.
-2. Evaluate temporal modeling and compact architecture variants.
-3. Measure quantization and pruning accuracy/latency trade-offs.
-4. Add posture or event detection only as separately evaluated tasks.
-
-### Hardware Deployment Direction
-
-The long-term pipeline is `CSI → compact pose model → posture/event features →
-local decision`. Candidate work includes integer quantization, reduced channel
-counts, pruning, and FPGA-oriented operator mapping. No hardware deployment
-claim is made in this release.
-
-### Acknowledgements / Dataset Attribution
-
-This work uses the MM-Fi dataset and interoperates with its official toolbox.
-Please cite the MM-Fi paper and follow the upstream dataset terms. Full citation
-details are provided in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
-
-### License
-
-No open-source license has been selected yet. The current `LICENSE` is an
-all-rights-reserved placeholder pending owner review. MM-Fi is governed by its
-own terms and is not redistributed here.
+No open-source license has been selected for this repository; see [`LICENSE`](LICENSE) for the current all-rights-reserved notice.
