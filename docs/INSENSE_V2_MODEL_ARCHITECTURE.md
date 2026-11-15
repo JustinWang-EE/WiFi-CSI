@@ -1,14 +1,14 @@
 # InSense V2 模型架構
 
-信心介面版本為 `D0-K4-M3-confidence-v1`。對同一段連續 64 幀 CSI，只推論一次 D0，再以兩套訓練集正規化各自送入 K4 和 M3。根節點與兩個分類器合計 **322,842** 個參數。
+信心介面版本為 `D0-K4-M3-confidence-v2`。對同一段連續 64 幀 CSI，只推論一次 D0，再以兩套訓練集正規化各自送入 K4 和 M3。根節點與兩個分類器合計 **322,842** 個參數。
 
 | 角色 | Checkpoint 身分 | 參數 | SHA256 |
 |---|---|---:|---|
 | V2-root | D0 Epoch 1 | 95,827 | `267314703a410c8d6d6c7dd95911fb30fad39c0b8c83fe539538d494c5d8748b` |
-| V2-posture | D0 K4 延伸實驗的 Epoch 15 | 111,492 | `59fbdae69be174430307bf73b2d1dd960fb0f5e651d1090b75af1b2716204667` |
+| V2-posture | D0 K4 延伸實驗的 Epoch 15 | 111,492 | `14d1a1f7681524defab98786031af866c473ea3487a765b7e3d199bd25b9e2da` |
 | V2-motion | D0 M3 十 epoch 實驗的 Epoch 4 | 115,523 | `4d7b078bb690b406b695db88bc8153521d5fe3c92c6031488e2a343ea629007e` |
 
-目前儲存庫的 `models/V2-root-testing.pt` 符合 D0 雜湊。K4、M3 需另行指定上表的原始 D0 相容 checkpoint。既有 `models/V2-posture.pt`、`models/V2-motion.pt` 屬於早期的 R03／ROOT9A 組合，載入器會拒絕其 SHA256。此版發布程式、設定與文件；模型來源和版本以 SHA256 驗證。
+正式權重為 `models/V2-root.pt`、`models/V2-posture.pt` 與 `models/V2-motion.pt`。載入器驗證 SHA256、模型參數數及 epoch，並以 strict 模式載入。兩個分類器的 checkpoint 同時繫結 D0 SHA256、taxonomy SHA256 及 class order。
 
 ## 推論規格
 
@@ -27,4 +27,4 @@
 | B2 | S20 | S21 | S22 |
 | B3 | S30 | S30 | S30 |
 
-達到姿態門檻的 B3 跳躍映射為 S30，與動態類別無關。兩個 head 的視窗身分與排序仍須一致。共有三個神經網路，十狀態由確定性規則組合。目前缺少獨立的 Safety State 真值與 STM32 上板、延遲、記憶體或量化驗證。
+Posture Top-1 為 B3 時，三種 Motion 類別都映射為候選 S30。兩個 head 的視窗身分與排序須一致。若未來啟用經驗證的門檻，正式接受仍須兩個 head 都通過。發布設定的候選只附類別名稱，接受狀態保持 UNCERTAIN。共有三個神經網路，十狀態由確定性規則組合。目前缺少獨立的 Safety State 真值與 STM32 上板、延遲、記憶體或量化驗證。

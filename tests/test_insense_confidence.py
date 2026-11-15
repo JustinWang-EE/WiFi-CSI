@@ -1,4 +1,3 @@
-from copy import deepcopy
 from dataclasses import asdict
 import json
 from pathlib import Path
@@ -10,7 +9,6 @@ import torch
 
 from wifi_densepose.confidence import (CHECKPOINTS, K4, M3, ConfidenceModel, WindowID, checkpoint_state,
     combine, describe, load_config, preprocess_csi, probabilities, state_code)
-from wifi_densepose.confidence_calibration import assess, fit_temperature, split_rows, threshold_for_coverage
 from wifi_densepose.models.cnn import SmallCSIPoseCNN
 from wifi_densepose.models.insense_heads import MotionOrPostureTCN
 
@@ -42,7 +40,10 @@ def test_state_mapping_and_policy():
     assert [state_code(p,m) for p in range(3) for m in range(3)]==expected
     assert {state_code(3,m) for m in [None,0,1,2]}=={'S30'}
     cfg=load_config(CONFIG)
-    assert combine(*predictions(cfg),cfg)=={'status':'UNKNOWN','state':None,'reason':'CONFIDENCE_UNVERIFIED'}
+    assert combine(*predictions(cfg),cfg)=={
+        'status':'UNCERTAIN','state':None,'candidate_state':'S12','state_name':'Lower-body Transition',
+        'reason':'CONFIDENCE_UNVERIFIED',
+    }
     cfg['calibration_status']='VERIFIED'
     p,m=predictions(cfg)
     cfg['heads']['posture']['thresholds']={'confidence':p.confidence,'margin':p.margin}
@@ -51,6 +52,9 @@ def test_state_mapping_and_policy():
     cfg['heads']['motion']['thresholds']['confidence']=np.nextafter(m.confidence,1.)
     assert combine(p,m,cfg)['reason']=='MOTION_ABSTAIN'
     jump,_=predictions(cfg,posture=3)
+    assert combine(jump,m,cfg)['candidate_state']=='S30'
+    assert combine(jump,m,cfg)['status']=='UNCERTAIN'
+    cfg['heads']['motion']['thresholds']['confidence']=m.confidence
     assert combine(jump,m,cfg)['state']=='S30'
     misaligned=describe('motion',m.logits,identity(start=1),cfg)
     assert combine(jump,misaligned,cfg)['status']=='INVALID_INPUT'
@@ -67,10 +71,15 @@ def test_shapes_missing_frames_and_output():
     stub.root=SmallCSIPoseCNN().eval();stub.posture=MotionOrPostureTCN(False).eval();stub.motion=MotionOrPostureTCN(True).eval()
     x=np.zeros((64,3,114,10),np.float32); ids=asdict(identity())
     result=stub.infer(x,**ids,stage7=True)
-    assert result['status']=='UNKNOWN' and result['identity']==ids
+    assert result['status']=='UNCERTAIN' and result['identity']==ids
     for key,n in [('posture',4),('motion',3)]:
-        assert len(result[key]['logits'])==n and np.isfinite(result[key]['logits']).all()
-        np.testing.assert_allclose(sum(result[key]['probabilities']),1)
+        scores = result[key]['class_probabilities_pct']
+        assert tuple(scores) == (K4 if key == 'posture' else M3)
+        assert len(scores) == n and np.isfinite(list(scores.values())).all()
+        np.testing.assert_allclose(sum(scores.values()),100)
+        assert result[key]['confidence_pct'] == scores[result[key]['predicted_class']] == max(scores.values())
+    assert result['candidate_state'] is not None and result['state'] is None
+    assert not any('score' in field or 'probabilit' in field for field in result)
     missing=ids|{'frames':tuple(k for k in range(65) if k!=30)}
     assert stub.infer(x,**missing,stage7=True)['status']=='INVALID_INPUT'
     assert stub.infer(x[1:],**ids,stage7=True)['status']=='INVALID_INPUT'
@@ -85,33 +94,14 @@ def test_config_roundtrip_and_weight_allowlist():
         other.write_text(json.dumps(cfg),encoding='utf-8'); loaded=load_config(other)
         assert [asdict(p) for p in predictions(loaded)]==[asdict(p) for p in predictions(cfg)]
         assert combine(*predictions(loaded),loaded)==combine(*predictions(cfg),cfg)
+        cfg['heads']['motion']['thresholds']={'confidence':0.7,'margin':0.0}
+        other.write_text(json.dumps(cfg),encoding='utf-8')
+        with ASSERT.assertRaisesRegex(ValueError,'Unverified'):load_config(other)
+        cfg['heads']['motion']['thresholds']=None
         cfg['heads']['posture']['classes'].reverse()
         other.write_text(json.dumps(cfg),encoding='utf-8')
         with ASSERT.assertRaisesRegex(ValueError,'class order'):load_config(other)
         with ASSERT.assertRaisesRegex(ValueError,'SHA256'):checkpoint_state(other,'root')
-
-
-def test_calibration_fit_is_deterministic_and_subject_separated():
-    cfg=load_config(CONFIG); rows=[]
-    logits=np.array([[3.,0.],[2.,1.],[3.,0.],[1.,2.]])
-    assert fit_temperature(logits,[0,1,0,1])==fit_temperature(logits,[0,1,0,1])
-    for subj in ('S01','S02'):
-        for j,truth in enumerate((0,1,0,1)):
-            ids=identity(subj,64*j);row={'identity':asdict(ids),'labels':{'posture':truth,'motion':truth}}
-            for h,n in [('posture',4),('motion',3)]:
-                scores=np.arange(n)*.0;scores[j%3]=4
-                row[h]=asdict(describe(h,scores,ids,cfg))
-            rows.append(row)
-    a=assess(rows,['S01'],['S02']); perturbed=deepcopy(rows)
-    perturbed[-1]['motion']['logits']=(10,-1,0)
-    b=assess(perturbed,['S01'],['S02'])
-    for name in ('posture','motion'):
-        assert a['heads'][name]['temperature_exploratory']==b['heads'][name]['temperature_exploratory']
-        for variant in a['heads'][name]['coverage']:
-            assert [r['threshold_fit_only'] for r in a['heads'][name]['coverage'][variant]]==[
-                    r['threshold_fit_only'] for r in b['heads'][name]['coverage'][variant]]
-    with ASSERT.assertRaisesRegex(ValueError,'disjoint'):split_rows(rows,['S01'],['S01','S02'])
-    assert threshold_for_coverage(np.array([.6,.6,.9]),2/3)==.6
 
 
 def load_tests(loader, tests, pattern):

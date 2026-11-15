@@ -1,10 +1,10 @@
 {
   "schema": "insense-v2-confidence/1",
-  "policy_version": "D0-K4-M3-confidence-v1",
+  "policy_version": "D0-K4-M3-confidence-v2",
   "calibration_status": "UNVERIFIED",
   "checkpoints": {
     "root": "267314703a410c8d6d6c7dd95911fb30fad39c0b8c83fe539538d494c5d8748b",
-    "posture": "59fbdae69be174430307bf73b2d1dd960fb0f5e651d1090b75af1b2716204667",
+    "posture": "14d1a1f7681524defab98786031af866c473ea3487a765b7e3d199bd25b9e2da",
     "motion": "4d7b078bb690b406b695db88bc8153521d5fe3c92c6031488e2a343ea629007e"
   },
   "heads": {
@@ -16,7 +16,7 @@
         "B3_JUMP"
       ],
       "taxonomy_sha256": "28d8f653c4cbba935e9ed2a2e5888d98f2d4e85a96365f65430d4118850559b9",
-      "temperature": 1.0,
+      "temperature": 3.0716,
       "thresholds": null,
       "mean": [
         -0.10163212906300263,
@@ -126,7 +126,7 @@
         "S3_POSTURE_TRANSITION"
       ],
       "taxonomy_sha256": "74f6a4414761350d9b82f1bf624b5ae6885c96210526ff9b7e965c48af47e3f6",
-      "temperature": 1.0,
+      "temperature": 1.3749,
       "thresholds": null,
       "mean": [
         -0.10163516487973742,

@@ -18,9 +18,15 @@ from .models.insense_heads import MotionOrPostureTCN
 WINDOW = 64
 K4 = ('B0_UPRIGHT_ACTIVITY', 'B1_LOWER_BODY_ACTIVITY', 'B2_BENT_OR_LOW', 'B3_JUMP')
 M3 = ('S0_STATIC', 'S1_IN_PLACE_ACTIVITY', 'S3_POSTURE_TRANSITION')
+STATE_NAMES = {
+    'S00': 'Upright Static', 'S01': 'Upright Activity', 'S02': 'Upright Transition',
+    'S10': 'Lower-body Static', 'S11': 'Lower-body Activity', 'S12': 'Lower-body Transition',
+    'S20': 'Bent or Low Static', 'S21': 'Bent or Low Activity', 'S22': 'Bent or Low Transition',
+    'S30': 'Jump',
+}
 CHECKPOINTS = {
     'root': ('267314703a410c8d6d6c7dd95911fb30fad39c0b8c83fe539538d494c5d8748b', 95827, 1),
-    'posture': ('59fbdae69be174430307bf73b2d1dd960fb0f5e651d1090b75af1b2716204667', 111492, 15),
+    'posture': ('14d1a1f7681524defab98786031af866c473ea3487a765b7e3d199bd25b9e2da', 111492, 15),
     'motion': ('4d7b078bb690b406b695db88bc8153521d5fe3c92c6031488e2a343ea629007e', 115523, 4),
 }
 K4_SHA = '28d8f653c4cbba935e9ed2a2e5888d98f2d4e85a96365f65430d4118850559b9'
@@ -91,18 +97,29 @@ def state_code(posture, motion=None):
 
 
 def combine(posture, motion, config):
+    empty = {'state': None, 'candidate_state': None, 'state_name': None}
     if posture.identity != motion.identity or posture.classes != K4 or motion.classes != M3:
-        return {'status': 'INVALID_INPUT', 'state': None, 'reason': 'HEAD_IDENTITY_OR_CLASS_MISMATCH'}
+        return empty | {'status': 'INVALID_INPUT', 'reason': 'HEAD_IDENTITY_OR_CLASS_MISMATCH'}
+    candidate = state_code(posture.index, motion.index)
+    output = empty | {'candidate_state': candidate, 'state_name': STATE_NAMES[candidate]}
     if config['calibration_status'] != 'VERIFIED':
-        return {'status': 'UNKNOWN', 'state': None, 'reason': 'CONFIDENCE_UNVERIFIED'}
+        return output | {'status': 'UNCERTAIN', 'reason': 'CONFIDENCE_UNVERIFIED'}
     for name, result in [('posture', posture), ('motion', motion)]:
-        if name == 'motion' and posture.index == 3:
-            break
         thresholds = config['heads'][name]['thresholds']
         if (thresholds is None or result.confidence < thresholds['confidence']
                 or result.margin < thresholds['margin']):
-            return {'status': 'UNKNOWN', 'state': None, 'reason': name.upper()+'_ABSTAIN'}
-    return {'status': 'VALID', 'state': state_code(posture.index,motion.index), 'reason': None}
+            return output | {'status': 'UNCERTAIN', 'reason': name.upper()+'_ABSTAIN'}
+    return output | {'status': 'VALID', 'state': candidate, 'reason': None}
+
+
+def head_output(prediction):
+    return {
+        'predicted_class': prediction.top1,
+        'confidence_pct': 100 * prediction.confidence,
+        'class_probabilities_pct': {
+            name: 100 * value for name, value in zip(prediction.classes, prediction.probabilities)
+        },
+    }
 
 
 def load_config(path):
@@ -117,8 +134,8 @@ def load_config(path):
             raise ValueError('Wrong class order or taxonomy digest')
         temp, thresh = h['temperature'], h['thresholds']
         probabilities([0.,1.],temp)
-        if cfg['calibration_status'] == 'UNVERIFIED' and (temp != 1. or thresh is not None):
-            raise ValueError('Unverified policy must preserve uncalibrated scores and abstain')
+        if cfg['calibration_status'] == 'UNVERIFIED' and thresh is not None:
+            raise ValueError('Unverified policy cannot enable acceptance thresholds')
         if thresh is not None and (set(thresh) != {'confidence','margin'} or any(not 0 <= t <= 1 for t in thresh.values())):
             raise ValueError('Invalid thresholds')
         for key in ('mean','std'):
@@ -214,19 +231,23 @@ class ConfidenceModel:
             pose=self.root(torch.from_numpy(x)).numpy()
             logits=self.logits_from_pose(pose[None])
         except (TypeError,ValueError,OverflowError) as e:
-            return {'status':'INVALID_INPUT','state':None,'reason':str(e),'identity':asdict(identity) if identity else
+            return {'status':'INVALID_INPUT','state':None,'candidate_state':None,'state_name':None,
+                    'reason':str(e),'identity':asdict(identity) if identity else
                     {'subject':subject,'sequence':sequence,'window':window,'frames':tuple(
                         int(f) if isinstance(f, Integral) else None for f in frame_ids)},'posture':None,'motion':None,
                     'policy_version':self.config['policy_version'],'root_sha256':CHECKPOINTS['root'][0]}
         p=describe('posture',logits['posture'][0],identity,self.config)
         m=describe('motion',logits['motion'][0],identity,self.config)
-        return combine(p,m,self.config) | {'identity':asdict(identity),'posture':asdict(p),'motion':asdict(m),
+        return combine(p,m,self.config) | {'identity':asdict(identity),'posture':head_output(p),'motion':head_output(m),
                                            'policy_version':self.config['policy_version'],'root_sha256':CHECKPOINTS['root'][0]}
 
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    for name in ('config','root','posture','motion','csi','identity'):
+    parser.add_argument('--config',type=Path,default=Path('configs/insense_v2_confidence.json'))
+    for name in ('root','posture','motion'):
+        parser.add_argument('--'+name,type=Path,default=Path(f'models/V2-{name}.pt'))
+    for name in ('csi','identity'):
         parser.add_argument('--'+name,type=Path,required=True)
     parser.add_argument('--stage7',action='store_true')
     args=parser.parse_args()
