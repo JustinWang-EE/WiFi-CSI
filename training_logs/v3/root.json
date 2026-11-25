@@ -1,0 +1,215 @@
+{
+  "schema": "insense-v3-training-log/1",
+  "model": "V3-root",
+  "checkpoint": {
+    "path": "models/V3-root.pt",
+    "sha256": "c42c0047f95ae7a631581b9b95bdb6aedcd9fb08a36ab63f544679d448ee3e75",
+    "parameters": 49371,
+    "best_epoch": 2
+  },
+  "source": {
+    "experiment": "INSENSE_V2_SMALL_ROOT_30E_V1/Small-B",
+    "csv": "epoch_metrics.csv",
+    "csv_sha256": "00579ee06c12f2b1a7c7d896ed78cf0c81c8911083b8031b959cdaa0df0beceb",
+    "config_sha256": "bd52d9a73f4282c5f288b3d0977737b188e5d1fc95f56960a13e320811557593"
+  },
+  "epochs_completed": 10,
+  "initialization": "from scratch; no root fine-tuning or distillation",
+  "architecture": {
+    "channels": [
+      12,
+      24,
+      32
+    ],
+    "kernel": 3,
+    "stride": 1,
+    "padding": 1,
+    "activation": "ReLU",
+    "adaptive_pool": [
+      4,
+      2
+    ],
+    "linear": [
+      256,
+      128,
+      51
+    ]
+  },
+  "training_settings": {
+    "seed": 0,
+    "epochs": 10,
+    "initialization": "scratch, PyTorch default Conv/Linear initialization",
+    "optimizer": "Adam",
+    "lr": 0.0003,
+    "weight_decay": 0,
+    "batch_pairs": 32,
+    "scheduler": null,
+    "loss": "mean Root17 Euclidean pose error + mean signed adjacent displacement vector error; original loss_parts",
+    "lambda_temporal": 1,
+    "early_stopping": false,
+    "train_subjects": [
+      "S01",
+      "S02",
+      "S03",
+      "S06",
+      "S07",
+      "S08",
+      "S11",
+      "S12",
+      "S13",
+      "S16",
+      "S17",
+      "S18",
+      "S21",
+      "S22",
+      "S23",
+      "S26",
+      "S27",
+      "S28",
+      "S31",
+      "S32",
+      "S33",
+      "S36",
+      "S37",
+      "S38"
+    ]
+  },
+  "evaluation": {
+    "unit": "216 recordings x 297 frames x 17 joints; pelvis-relative; prediction root unaltered",
+    "selection": "minimum DEV Root17 MPJPE; earlier epoch wins ties",
+    "status": "exploratory / non-independent DEV",
+    "official_test_used": false,
+    "dev_subjects": [
+      "S04",
+      "S09",
+      "S14",
+      "S19",
+      "S24",
+      "S29",
+      "S34",
+      "S39"
+    ]
+  },
+  "metric_units": {
+    "epoch": "epoch",
+    "train_total_m": "m",
+    "train_pose_m": "m",
+    "train_velocity_m_per_frame": "m per adjacent frame",
+    "dev_root17_mpjpe_mm": "mm",
+    "train_seconds": "seconds",
+    "dev_seconds": "seconds",
+    "epoch_seconds": "seconds"
+  },
+  "epochs": [
+    {
+      "epoch": 1,
+      "train_total_m": 0.14681843918439624,
+      "train_pose_m": 0.11909172478982477,
+      "train_velocity_m_per_frame": 0.02772671436194255,
+      "dev_root17_mpjpe_mm": 112.61169458666326,
+      "train_seconds": 181.5983309999574,
+      "dev_seconds": 6.694827000028454,
+      "epoch_seconds": 188.29315799998585
+    },
+    {
+      "epoch": 2,
+      "train_total_m": 0.1445438257285882,
+      "train_pose_m": 0.11667569589850543,
+      "train_velocity_m_per_frame": 0.027868129670977952,
+      "dev_root17_mpjpe_mm": 112.06322222517183,
+      "train_seconds": 146.26494080002885,
+      "dev_seconds": 4.440584199968725,
+      "epoch_seconds": 150.70552499999758
+    },
+    {
+      "epoch": 3,
+      "train_total_m": 0.14419734415473603,
+      "train_pose_m": 0.11608105297904235,
+      "train_velocity_m_per_frame": 0.02811629107687467,
+      "dev_root17_mpjpe_mm": 112.44430142398011,
+      "train_seconds": 167.70950850006193,
+      "dev_seconds": 8.108437999966554,
+      "epoch_seconds": 175.81794650002848
+    },
+    {
+      "epoch": 4,
+      "train_total_m": 0.14382455219795276,
+      "train_pose_m": 0.11546640120096155,
+      "train_velocity_m_per_frame": 0.02835815090718401,
+      "dev_root17_mpjpe_mm": 113.14292482320539,
+      "train_seconds": 165.83868689998053,
+      "dev_seconds": 6.156885899952613,
+      "epoch_seconds": 171.99557279993314
+    },
+    {
+      "epoch": 5,
+      "train_total_m": 0.14343304140943863,
+      "train_pose_m": 0.11482970641778635,
+      "train_velocity_m_per_frame": 0.028603334959644875,
+      "dev_root17_mpjpe_mm": 113.21763155694241,
+      "train_seconds": 166.83736659993883,
+      "dev_seconds": 6.0905083999969065,
+      "epoch_seconds": 172.92787499993574
+    },
+    {
+      "epoch": 6,
+      "train_total_m": 0.1430839228210427,
+      "train_pose_m": 0.1142763680852092,
+      "train_velocity_m_per_frame": 0.02880755466995416,
+      "dev_root17_mpjpe_mm": 113.29385672056819,
+      "train_seconds": 167.6250678000506,
+      "dev_seconds": 6.782543399953283,
+      "epoch_seconds": 174.40761120000388
+    },
+    {
+      "epoch": 7,
+      "train_total_m": 0.14272691682229688,
+      "train_pose_m": 0.11369898574209866,
+      "train_velocity_m_per_frame": 0.029027931062174633,
+      "dev_root17_mpjpe_mm": 112.90141083034769,
+      "train_seconds": 161.10077430005185,
+      "dev_seconds": 5.455090699950233,
+      "epoch_seconds": 166.5558650000021
+    },
+    {
+      "epoch": 8,
+      "train_total_m": 0.1423670894177031,
+      "train_pose_m": 0.11315448150227657,
+      "train_velocity_m_per_frame": 0.02921260783276659,
+      "dev_root17_mpjpe_mm": 113.0655466289037,
+      "train_seconds": 172.66109609999694,
+      "dev_seconds": 6.8417589999735355,
+      "epoch_seconds": 179.50285509997047
+    },
+    {
+      "epoch": 9,
+      "train_total_m": 0.14199113816738845,
+      "train_pose_m": 0.11260682124300206,
+      "train_velocity_m_per_frame": 0.029384316971931394,
+      "dev_root17_mpjpe_mm": 112.92463069389778,
+      "train_seconds": 152.81592329998966,
+      "dev_seconds": 6.226626900024712,
+      "epoch_seconds": 159.04255020001438
+    },
+    {
+      "epoch": 10,
+      "train_total_m": 0.14166393895590945,
+      "train_pose_m": 0.11213302494094776,
+      "train_velocity_m_per_frame": 0.029530913966484457,
+      "dev_root17_mpjpe_mm": 113.6558285738779,
+      "train_seconds": 148.86992389999796,
+      "dev_seconds": 3.976521600037813,
+      "epoch_seconds": 152.84644550003577
+    }
+  ],
+  "best": {
+    "epoch": 2,
+    "train_total_m": 0.1445438257285882,
+    "train_pose_m": 0.11667569589850543,
+    "train_velocity_m_per_frame": 0.027868129670977952,
+    "dev_root17_mpjpe_mm": 112.06322222517183,
+    "train_seconds": 146.26494080002885,
+    "dev_seconds": 4.440584199968725,
+    "epoch_seconds": 150.70552499999758
+  }
+}
