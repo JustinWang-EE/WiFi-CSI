@@ -33,7 +33,6 @@ Checkpoint identities, SHA256 hashes, class ordering, preprocessing, and the exa
 |---|---|---:|---:|
 | V3-root | Pose frames (pelvis-relative Root17) | — | **112.063 mm MPJPE** |
 | V3-posture | **216 sequences**, each aggregated from nine window logits | **68.06%** | **57.54% Macro-F1** |
-| V3-posture | **972 overlapping 64-frame windows** | 57.61% | 42.79% Macro-F1 |
 | V3-motion | **850 labeled 64-frame windows** | **61.18%** | **61.36% Macro-F1** |
 
 **The two Posture rows use different units and cohorts.** The 216-sequence evaluation averages nine window logits per recording for eight DEV subjects: S04, S09, S14, S19, S24, S29, S34, and S39. The 972-window Posture result uses individual windows from S04, S14, S24, and S34. The 850 labeled Motion windows are a subset of those same 972 windows. The difference between the Posture scores cannot be attributed to aggregation alone. The Root result measures pose error in millimetres. **V3 Posture performs below V2 on the matched 972-window evaluation:** Accuracy 57.61% versus 63.79%, and Macro-F1 42.79% versus 43.42%. Sequence Macro-F1 and Motion results do not establish a uniform improvement across evaluation units.
